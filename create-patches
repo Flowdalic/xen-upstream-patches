@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
+cd "${SCRIPT_DIR}"
+
+if [[ ! -v XEN_REPO_DIR ]]; then
+	XEN_REPO_DIR="${HOME}/repos/xen"
+fi
+
+XEN_VERSION="${1}"
+OUR_PATCHES_VERSION="${2}"
+
+XEN_VER_COMPONENTS=( ${XEN_VERSION//./ } )
+XEN_MAJOR_MINOR_VERSION="${XEN_VER_COMPONENTS[0]}.${XEN_VER_COMPONENTS[1]}"
+
+
+git -C "${XEN_REPO_DIR}" fetch origin
+
+readarray -d '' CURRENT_PATCHES < <(find . -maxdepth 1 -type f -name "*.patch" -print0)
+if [[ ${CURRENT_PATCHES[@]} -gt 0 ]]; then
+	git rm -f *.patch
+fi
+
+PATCH_RANGE_START="RELEASE-${XEN_VERSION}"
+PATCH_RANGE_END="staging-${XEN_MAJOR_MINOR_VERSION}"
+git -C "${XEN_REPO_DIR}" format-patch \
+	-o "${SCRIPT_DIR}" \
+	${PATCH_RANGE_START}..origin/${PATCH_RANGE_END}
+
+XEN_NEXT_PATCHLEVEL=$((XEN_VER_COMPONENTS[2]+1))
+XEN_NEXT_VERSION="${XEN_MAJOR_MINOR_VERSION}.${XEN_NEXT_PATCHLEVEL}"
+
+PATCH_RANGE_START_ID=$(git -C "${XEN_REPO_DIR}" rev-parse ${PATCH_RANGE_START})
+PATCH_RANGE_END_ID=$(git -C "${XEN_REPO_DIR}" rev-parse ${PATCH_RANGE_END})
+
+cat <<EOF > "info.txt"
+Xen upstream patchset #${OUR_PATCHES_VERSION} for ${XEN_NEXT_VERSION}-pre
+
+Containing patches from
+$PATCH_RANGE_START ($PATCH_RANGE_START_ID)
+to
+$PATCH_RANGE_END ($PATCH_RANGE_END_ID)
+EOF
+
+git add \
+	info.txt \
+	*.patch
+
+TAG="${XEN_NEXT_VERSION}-pre-patchset-${OUR_PATCHES_VERSION}"
+DESCRIPTION="Xen ${TAG}"
+
+git commit \
+	--signoff \
+	-m "${DESCRIPTION}"
+
+git tag \
+	-s \
+	-m "${DESCRIPTION}" \
+	"${TAG}"
